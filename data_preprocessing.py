@@ -36,7 +36,7 @@ TARGET_WIDTH = 160
 def parse_line(line):
     """Parses a single line of text into a clip dictionary."""
     parts = line.strip().split()
-    if len(parts) < 2: return None
+    if len(parts) < 2: return None# means there is no directory
     
     filename_full = parts[0]
     try:
@@ -46,7 +46,7 @@ def parse_line(line):
         return None
 
     # Filename format example: Suturing_C001_000026_003180.txt
-    name_parts = filename_full.replace('.txt', '').split('_')
+    name_parts = filename_full.replace('.txt', '').split('_')#['Suturing', 'C001', '000026', '003180']
     
     # Reconstruct base video name (e.g., Suturing_C001)
     # The last two parts are start/end frames, everything before is the video name
@@ -152,9 +152,9 @@ def process_clip(clip_info):
     # Fallback: Recursive search if not found in top dir (e.g., subfolders)
     if not vid_path:
         # Try finding capture1 recursively
-        found = glob(os.path.join(RAW_VIDEO_DIR, '**', f"{video_name}*capture1.avi"), recursive=True)
+        found = glob(os.path.join(RAW_VIDEO_DIR, '**', f"{video_name}*capture1.avi"), recursive=True)#the box
         if found:
-            vid_path = found[0]
+            vid_path = found[0]#grabs the file path out of the box so you can use it.
         else:
             # Try finding base name recursively
             found = glob(os.path.join(RAW_VIDEO_DIR, '**', f"{video_name}.avi"), recursive=True)
@@ -194,16 +194,16 @@ def process_clip(clip_info):
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
     # Safety check for frame range
-    if end_frame > total_frames: end_frame = total_frames
+    if end_frame > total_frames: end_frame = total_frames#Only take pictures if we are currently inside the 'interesting' zone." If the current frame is past end_frame, the code ignores it.
 
     processed_indices = []
     frame_idx = 0
     saved_count = 0
     
     while True:
-        ret, frame = cap.read()
+        ret, frame = cap.read()#ret is boolean
         if not ret: break
-        
+        #this below block decides which specific pictures to keep from the video, shrinks them down to a manageable size, and saves them in a neat, numbered order.
         # Logic: Only save frames within the clip range
         if frame_idx >= start_frame and frame_idx <= end_frame:
             # Downsample logic: (frame_idx - start) % SKIP == 0
@@ -216,9 +216,9 @@ def process_clip(clip_info):
                 
                 # Save as 00000.jpg, 00001.jpg, etc.
                 fname = f"{saved_count:05d}.jpg"
-                cv2.imwrite(os.path.join(save_img_dir, fname), resized_frame)
+                cv2.imwrite(os.path.join(save_img_dir, fname), resized_frame)#frames created in save_img_dir
                 
-                processed_indices.append(frame_idx)
+                processed_indices.append(frame_idx)#It tracks which frames you decided to keep.
                 saved_count += 1
         
         frame_idx += 1
@@ -227,8 +227,9 @@ def process_clip(clip_info):
     cap.release()
 
     # --- 4. PROCESS KINEMATICS ---
+    #It takes the raw movement data (kinematics) and forces it to match the video frames you just saved
     try:
-        kin_data = np.loadtxt(kin_path)
+        kin_data = np.loadtxt(kin_path)#t opens the text file found at kin_path and loads all the numbers into a NumPy array (a grid of numbers).
         
         # Match kinematics rows to the EXACT video frames we saved
         # We use min() to clamp indices in case kinematics is slightly shorter than video
@@ -286,7 +287,7 @@ def main():
 
     # 4. Save Master Labels CSV
     df_all = pd.DataFrame(results, columns=['ClipName', 'GRS_Score'])
-    df_all.to_csv(os.path.join(OUTPUT_LABELS, 'all_labels.csv'), index=False)
+    df_all.to_csv(os.path.join(OUTPUT_LABELS, 'all_labels.csv'), index=False)#
 
     # 5. Generate CSVs for EACH split found
     print("\nGenerating Split CSVs...")
@@ -302,10 +303,11 @@ def main():
         # Filter the master results to create the CSVs
         df_train = df_all[df_all['ClipName'].isin(train_names)]
         df_test = df_all[df_all['ClipName'].isin(test_names)]
-        
+        #Keep only the rows where the video name is inside the train_names and test_names list in csv firm"
         df_train.to_csv(os.path.join(split_dir, 'train_labels.csv'), index=False)
         df_test.to_csv(os.path.join(split_dir, 'test_labels.csv'), index=False)
-        
+
+        # Saves these filtered tables into that split's folder.
         # If this is the "default" or first split, also save to main labels folder for easy loading
         if split_name == list(splits.keys())[0]:
             df_train.to_csv(os.path.join(OUTPUT_LABELS, 'train_labels.csv'), index=False)

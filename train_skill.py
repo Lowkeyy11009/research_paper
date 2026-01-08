@@ -96,12 +96,12 @@ def train (args, split_index, device, save_label):
                                             return_position_masks=return_position_masks,
                                             score_norm_bias=0, score_norm_weight=1,
                         ) for x in ['train', 'val']}
-    print({x: 'Num of clips:{}'.format(len(video_datasets[x])) for x in ['train', 'val']})
+    print({x: 'Num of clips:{}'.format(len(video_datasets[x])) for x in ['train', 'val']})#{'train': 'Num of clips:31', 'val': 'Num of clips:8'}
     # dataloaders = {x: DataLoader(video_datasets[x], batch_size=args.batch_size, shuffle=(x=='train'),
     #                   num_workers=128) for x in ['train', 'val']}
     batch_size_dict = {'train': args.batch_size, 'val': 1}
     dataloaders = {x: DataLoader(video_datasets[x], batch_size=batch_size_dict[x], shuffle=(x=='train'),
-                      num_workers=8) for x in ['train', 'val']}
+                      num_workers=0) for x in ['train', 'val']}
 
     if multi_gpu:
         print('Use', num_devices, 'GPUs!')
@@ -115,9 +115,13 @@ def train (args, split_index, device, save_label):
             if 'extractor' in pname:
                 model_wgt[pname] = pretrain_wgt[pname]
         model.load_state_dict(model_wgt)
+    #Search: Find a pre-trained "Across-task" model file.
+    #Filter: Grab only the "Extractor" weights (the visual part).
+    #Inject: Load those weights into the current model.
+    #Start: Begin training from a "smart" starting point.
 
     if args.freeze_extractor:
-        for pname, param in model.named_parameters():
+        for pname, param in model.named_parameters():#namrd used cuz label tells wut to freeze
             if 'extractor' in pname:
                 param.requires_grad = False
             else:
@@ -139,7 +143,7 @@ def train (args, split_index, device, save_label):
             param.requires_grad = True
     params_for_update = [param for param in model.parameters() if param.requires_grad == True]
     optimizer = torch.optim.SGD(params_for_update, lr=args.learning_rate, momentum=0.9, weight_decay=args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.schedule_step, gamma=0.1) 
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.schedule_step, gamma=0.1) #nitializes a learning rate scheduler that automatically adjusts the learning rate of your optimizer during the training process. 
     criterion = nn.MSELoss()
 
     if args.visualize or args.save_separately:
@@ -190,7 +194,7 @@ def train (args, split_index, device, save_label):
                 inputs = samples[0].to(device)  # BxLx3x112x112
                 labels = samples[1].to(device, dtype=torch.float) # B
                 batch_video_names = samples[2]
-
+                #sample -> skillvideodataset which return video_tensor, score, video_name, sample_idx
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
@@ -198,7 +202,7 @@ def train (args, split_index, device, save_label):
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     # Get model outputs and calculate loss
-                    outputs, part_assigns, part_att = model(inputs)   # Bx1, BxLx3x7x7, BxLx3/BxLx1x14x14
+                    outputs, part_assigns, part_att = model(inputs)   # Bx1, BxLx3x7x7, BxLx3/BxLx1x14x14 ->video_tensor(T*F) x C x H x W
                     outputs = outputs.squeeze(1)    # B
 
                     main_loss = criterion(outputs, labels)
@@ -256,14 +260,16 @@ def train (args, split_index, device, save_label):
                 running_loss += loss.item() * inputs.size(0)
                 pred_scores.append(torch.round(outputs))
                 gt_scores.append(labels)
-                all_video_names += batch_video_names
+                all_video_names += batch_video_names#line 196
 
             pred_scores = torch.cat(pred_scores, dim=0).detach().to('cpu').numpy()
+            # pred_scores =[ [15.2, 14.1], [22.8, 19.5], ... ](batch_size =2)
+            #This takes the list of small batch tensors and "concatenates" (glues) them together into one long vertical column.
             gt_scores = torch.cat(gt_scores, dim=0).to('cpu').numpy()
 
-            epoch_loss = running_loss / len(dataloaders[phase].dataset)
+            epoch_loss = running_loss / len(dataloaders[phase].dataset)#The average Mean Squared Error (MSE) per video.
             epoch_rho, epoch_pvalue = stats.spearmanr(gt_scores, pred_scores)
-            epoch_l1 = np.abs(gt_scores - pred_scores).mean()
+            epoch_l1 = np.abs(gt_scores - pred_scores).mean()#the Mean Absolute Error (MAE).
 
             print(f'{phase} Loss: {epoch_loss:.4f} Rho: {epoch_rho:.4f} P-value: {epoch_pvalue:.4f}.')
             if phase == 'val':
@@ -273,7 +279,7 @@ def train (args, split_index, device, save_label):
                 print('GT scores:       ', end =" ")
                 [print(f'{gt_score:.2f}', end =" ") for gt_score in gt_scores]
                 print()
-            print(f'lr: {scheduler.get_last_lr()}.')
+            print(f'lr: {scheduler.get_last_lr()}.')#prints scheduled learning rate
 
             # deep copy the model
             if phase == 'val':
@@ -305,7 +311,7 @@ def train (args, split_index, device, save_label):
     return val_rho_history, best_rho, best_l1
 
 if __name__ == '__main__':
-    import argparse
+    import argparse#This allows you to control the experiment from the command line without changing the code.
     parser = argparse.ArgumentParser()
     parser.add_argument("--extractor", type=str, default='r2p1d',
                         choices=['r2p1d', 'r2p1d_4layer', 'r3d', 'r3d_4layer', 'r2d', 'r2d_50', 'r2d_101'],
@@ -369,8 +375,8 @@ if __name__ == '__main__':
     torch.manual_seed(args.randseed)
     torch.cuda.manual_seed_all(args.randseed)
 
-    model_type = f'{args.extractor}_{args.context}_{args.aggregate}'
-    save_label = f"Skill{args.task}_{args.val_split}_{model_type}_{args.num_parts}parts"
+    model_type = f'{args.extractor}_{args.context}_{args.aggregate}'#r2p1d_bilstm_avgpool
+    save_label = f"Skill{args.task}_{args.val_split}_{model_type}_{args.num_parts}parts"#SkillSuturing_SuperTrialOut_r2p1d_bilstm_avgpool_3parts
     if args.no_pastpro:
         save_label += "_np"
     if args.simple_pastpro:
@@ -418,7 +424,7 @@ if __name__ == '__main__':
         if args.task == 'Needle_Passing':
             split_ids.remove(6)
         print(f'Run all {split_num} split.')
-    elif args.split_index in list(range(1, split_num+1)):
+    elif args.split_index in list(range(1, split_num+1)):#if u want to run a specific split
         split_ids = [args.split_index]
         print(f'Only run the {args.split_index}-th split.')
         if args.task == 'Needle_Passing' and args.split_index == 6:
